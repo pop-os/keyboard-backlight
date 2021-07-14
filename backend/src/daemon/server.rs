@@ -7,12 +7,13 @@ use std::{
     collections::HashMap,
     io::{self, BufRead, BufReader, Read, Write},
     str,
+    thread::sleep,
     time::Duration,
 };
 use uuid::Uuid;
 
 use super::{err_str, BoardId, Daemon, DaemonCommand};
-use crate::Matrix;
+use crate::{Benchmark, Matrix, Selma, SelmaKind};
 
 pub struct DaemonServer<R: Read + Send + 'static, W: Write + Send + 'static> {
     hidapi: RefCell<Option<HidApi>>,
@@ -21,6 +22,7 @@ pub struct DaemonServer<R: Read + Send + 'static, W: Write + Send + 'static> {
     write: W,
     boards: RefCell<HashMap<BoardId, (Ec<Box<dyn Access>>, Option<DeviceInfo>)>>,
     board_ids: RefCell<Vec<BoardId>>,
+    selma: RefCell<Option<Ec<AccessHid>>>,
 }
 
 impl DaemonServer<io::Stdin, io::Stdout> {
@@ -68,6 +70,7 @@ impl<R: Read + Send + 'static, W: Write + Send + 'static> DaemonServer<R, W> {
             write,
             boards: RefCell::new(boards),
             board_ids: RefCell::new(board_ids),
+            selma: RefCell::new(None),
         })
     }
 
@@ -165,6 +168,67 @@ impl<R: Read + Send + 'static, W: Write + Send + 'static> Daemon for DaemonServe
         let rows = data.remove(0) as usize;
         let cols = data.remove(0) as usize;
         Ok(Matrix::new(rows, cols, data.into_boxed_slice()))
+    }
+
+    fn benchmark(&self, _board: BoardId) -> Result<Benchmark, String> {
+        Benchmark::new().map_err(err_str)
+    }
+
+    fn selma(&self, board: BoardId, kind: SelmaKind) -> Result<Selma, String> {
+        if let Some(selma) = &mut *self.selma.borrow_mut() {
+            let delay_ms = 300;
+            info!("Selma delay is {} ms", delay_ms);
+            let delay = Duration::from_millis(delay_ms);
+
+            // Check if Selma is already closed
+            if unsafe { selma.led_get_value(0).map_err(err_str)?.0 > 0 } {
+                info!("Open Selma");
+                unsafe { selma.led_set_value(0, 0).map_err(err_str)? };
+
+                info!("Sleep");
+                sleep(delay);
+            }
+
+            info!("Close Selma");
+            unsafe { selma.led_set_value(0, 1).map_err(err_str)? };
+
+            info!("Sleep");
+            sleep(delay);
+
+            // Get pressed keys while selma is closed
+            let matrix = self.matrix_get(board)?;
+
+            // Either missing or bouncing is set depending on test
+            let (mut missing, bouncing) = match kind {
+                SelmaKind::Normal => (matrix.clone(), Matrix::default()),
+                SelmaKind::Bouncing => (Matrix::default(), matrix.clone()),
+            };
+
+            // Missing must be inverted, since missing keys are not pressed
+            for row in 0..missing.rows() {
+                for col in 0..missing.cols() {
+                    let value = missing.get(row, col).unwrap_or(false);
+                    missing.set(row, col, !value);
+                }
+            }
+
+            info!("Open Selma");
+            unsafe { selma.led_set_value(0, 0).map_err(err_str)? };
+
+            info!("Sleep");
+            sleep(delay);
+
+            // Anything still pressed after selma is opened is sticking
+            let sticking = self.matrix_get(board)?;
+
+            Ok(Selma {
+                missing,
+                bouncing,
+                sticking,
+            })
+        } else {
+            Err(format!("failed to find Selma"))
+        }
     }
 
     fn color(&self, board: BoardId, index: u8) -> Result<(u8, u8, u8), String> {
@@ -269,6 +333,34 @@ impl<R: Read + Send + 'static, W: Write + Send + 'static> Daemon for DaemonServe
                             },
                             Err(err) => {
                                 error!("Failed to open USB HID EC at {:?}: {:?}", info.path(), err)
+                            }
+                        }
+                    }
+                    // System76 launch-selma
+                    (0x3384, 0x0002, 0) => {
+                        if self.selma.borrow().is_some() {
+                            continue;
+                        }
+
+                        match info.open_device(&api) {
+                            Ok(device) => match AccessHid::new(device, 10, 1000) {
+                                Ok(access) => match unsafe { Ec::new(access) } {
+                                    Ok(ec) => {
+                                        info!("Adding Selma at {:?}", info.path());
+                                        *self.selma.borrow_mut() = Some(ec);
+                                    }
+                                    Err(err) => error!(
+                                        "Failed to probe Selma at {:?}: {:?}",
+                                        info.path(),
+                                        err
+                                    ),
+                                },
+                                Err(err) => {
+                                    error!("Failed to access Selma at {:?}: {:?}", info.path(), err)
+                                }
+                            },
+                            Err(err) => {
+                                error!("Failed to open Selma at {:?}: {:?}", info.path(), err)
                             }
                         }
                     }

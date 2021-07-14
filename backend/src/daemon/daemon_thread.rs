@@ -18,7 +18,7 @@ use std::{
     time::Duration,
 };
 
-use super::{Benchmark, BoardId, Daemon, Matrix, Nelson, NelsonKind};
+use super::{Benchmark, BoardId, Daemon, Matrix, Selma, SelmaKind};
 use crate::Board;
 
 #[derive(Clone, Debug)]
@@ -54,7 +54,7 @@ enum SetEnum {
     Brightness(Item<(BoardId, u8), i32>),
     Mode(Item<(BoardId, u8), (u8, u8)>),
     Benchmark(BoardId),
-    Nelson(BoardId, NelsonKind),
+    Selma(BoardId, SelmaKind),
     LedSave(BoardId),
     MatrixGetRate(Item<(), Option<Duration>>),
     Refresh,
@@ -64,7 +64,7 @@ enum SetEnum {
 impl SetEnum {
     fn is_cancelable(&self) -> bool {
         match self {
-            Self::Nelson(_, _) | Self::Benchmark(_) => false,
+            Self::Selma(_, _) | Self::Benchmark(_) => false,
             _ => true,
         }
     }
@@ -81,7 +81,7 @@ enum Response {
     Benchmark(Benchmark),
     Canceled,
     Empty,
-    Nelson(Box<Nelson>),
+    Selma(Box<Selma>),
 }
 
 impl Into<Response> for Benchmark {
@@ -96,9 +96,9 @@ impl Into<Response> for () {
     }
 }
 
-impl Into<Response> for Nelson {
+impl Into<Response> for Selma {
     fn into(self) -> Response {
-        Response::Nelson(Box::new(self))
+        Response::Selma(Box::new(self))
     }
 }
 
@@ -226,10 +226,10 @@ impl ThreadClient {
         }
     }
 
-    pub async fn nelson(&self, board: BoardId, kind: NelsonKind) -> Result<Nelson, String> {
-        let resp = self.send(SetEnum::Nelson(board, kind)).await?;
-        if let Response::Nelson(nelson) = resp {
-            Ok(*nelson)
+    pub async fn selma(&self, board: BoardId, kind: SelmaKind) -> Result<Selma, String> {
+        let resp = self.send(SetEnum::Selma(board, kind)).await?;
+        if let Response::Selma(selma) = resp {
+            Ok(*selma)
         } else {
             panic!(format!("'{:?}' unexpected", resp));
         }
@@ -354,7 +354,7 @@ impl Thread {
                 set.reply(self.daemon.set_mode(key.0, key.1, value.0, value.1))
             }
             SetEnum::Benchmark(board) => set.reply(self.daemon.benchmark(board)),
-            SetEnum::Nelson(board, kind) => set.reply(self.daemon.nelson(board, kind)),
+            SetEnum::Selma(board, kind) => set.reply(self.daemon.selma(board, kind)),
             SetEnum::LedSave(board) => set.reply(self.daemon.led_save(board)),
             SetEnum::MatrixGetRate(Item { value, .. }) => {
                 self.matrix_get_rate.set(value);

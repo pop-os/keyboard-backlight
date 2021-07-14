@@ -27,11 +27,11 @@ mod layout;
 mod localize;
 mod matrix;
 mod mode;
-mod nelson;
 mod rect;
+mod selma;
 
 use crate::daemon::*;
 pub use crate::{
     backend::*, benchmark::*, board::*, color::*, deref_cell::*, key::*, keymap::*, layer::*,
-    layout::*, localize::*, matrix::*, mode::*, nelson::*, rect::*,
+    layout::*, localize::*, matrix::*, mode::*, rect::*, selma::*,
 };

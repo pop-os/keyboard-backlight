@@ -1,7 +1,7 @@
 use std::{cell::RefCell, collections::HashMap};
 
 use super::{BoardId, Daemon};
-use crate::{fl, Benchmark, Layout, Matrix, Nelson, NelsonKind};
+use crate::{fl, Benchmark, Layout, Matrix, Selma, SelmaKind};
 
 struct BoardDummy {
     name: String,
@@ -101,7 +101,7 @@ impl Daemon for DaemonDummy {
         Err("Unimplemented".to_string())
     }
 
-    fn nelson(&self, _board: BoardId, _kind: NelsonKind) -> Result<Nelson, String> {
+    fn selma(&self, _board: BoardId, _kind: SelmaKind) -> Result<Selma, String> {
         Err("Unimplemented".to_string())
     }
 

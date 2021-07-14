@@ -4,19 +4,19 @@ use std::cmp;
 use crate::Matrix;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
-pub enum NelsonKind {
+pub enum SelmaKind {
     Normal,
     Bouncing,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-pub struct Nelson {
+pub struct Selma {
     pub missing: Matrix,
     pub bouncing: Matrix,
     pub sticking: Matrix,
 }
 
-impl Nelson {
+impl Selma {
     pub fn max_rows(&self) -> usize {
         cmp::max(
             self.missing.rows(),

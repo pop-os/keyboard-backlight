@@ -13,7 +13,7 @@ use std::{
 use uuid::Uuid;
 
 use super::{err_str, BoardId, Daemon, DaemonCommand};
-use crate::{Benchmark, Matrix, Nelson, NelsonKind};
+use crate::{Benchmark, Matrix, Selma, SelmaKind};
 
 pub struct DaemonServer<R: Read + Send + 'static, W: Write + Send + 'static> {
     hidapi: RefCell<Option<HidApi>>,
@@ -22,7 +22,7 @@ pub struct DaemonServer<R: Read + Send + 'static, W: Write + Send + 'static> {
     write: W,
     boards: RefCell<HashMap<BoardId, (Ec<Box<dyn Access>>, Option<DeviceInfo>)>>,
     board_ids: RefCell<Vec<BoardId>>,
-    nelson: RefCell<Option<Ec<AccessHid>>>,
+    selma: RefCell<Option<Ec<AccessHid>>>,
 }
 
 impl DaemonServer<io::Stdin, io::Stdout> {
@@ -70,7 +70,7 @@ impl<R: Read + Send + 'static, W: Write + Send + 'static> DaemonServer<R, W> {
             write,
             boards: RefCell::new(boards),
             board_ids: RefCell::new(board_ids),
-            nelson: RefCell::new(None),
+            selma: RefCell::new(None),
         })
     }
 
@@ -174,34 +174,34 @@ impl<R: Read + Send + 'static, W: Write + Send + 'static> Daemon for DaemonServe
         Benchmark::new().map_err(err_str)
     }
 
-    fn nelson(&self, board: BoardId, kind: NelsonKind) -> Result<Nelson, String> {
-        if let Some(nelson) = &mut *self.nelson.borrow_mut() {
+    fn selma(&self, board: BoardId, kind: SelmaKind) -> Result<Selma, String> {
+        if let Some(selma) = &mut *self.selma.borrow_mut() {
             let delay_ms = 300;
-            info!("Nelson delay is {} ms", delay_ms);
+            info!("Selma delay is {} ms", delay_ms);
             let delay = Duration::from_millis(delay_ms);
 
-            // Check if Nelson is already closed
-            if unsafe { nelson.led_get_value(0).map_err(err_str)?.0 > 0 } {
-                info!("Open Nelson");
-                unsafe { nelson.led_set_value(0, 0).map_err(err_str)? };
+            // Check if Selma is already closed
+            if unsafe { selma.led_get_value(0).map_err(err_str)?.0 > 0 } {
+                info!("Open Selma");
+                unsafe { selma.led_set_value(0, 0).map_err(err_str)? };
 
                 info!("Sleep");
                 sleep(delay);
             }
 
-            info!("Close Nelson");
-            unsafe { nelson.led_set_value(0, 1).map_err(err_str)? };
+            info!("Close Selma");
+            unsafe { selma.led_set_value(0, 1).map_err(err_str)? };
 
             info!("Sleep");
             sleep(delay);
 
-            // Get pressed keys while nelson is closed
+            // Get pressed keys while selma is closed
             let matrix = self.matrix_get(board)?;
 
             // Either missing or bouncing is set depending on test
             let (mut missing, bouncing) = match kind {
-                NelsonKind::Normal => (matrix.clone(), Matrix::default()),
-                NelsonKind::Bouncing => (Matrix::default(), matrix.clone()),
+                SelmaKind::Normal => (matrix.clone(), Matrix::default()),
+                SelmaKind::Bouncing => (Matrix::default(), matrix.clone()),
             };
 
             // Missing must be inverted, since missing keys are not pressed
@@ -212,22 +212,22 @@ impl<R: Read + Send + 'static, W: Write + Send + 'static> Daemon for DaemonServe
                 }
             }
 
-            info!("Open Nelson");
-            unsafe { nelson.led_set_value(0, 0).map_err(err_str)? };
+            info!("Open Selma");
+            unsafe { selma.led_set_value(0, 0).map_err(err_str)? };
 
             info!("Sleep");
             sleep(delay);
 
-            // Anything still pressed after nelson is opened is sticking
+            // Anything still pressed after selma is opened is sticking
             let sticking = self.matrix_get(board)?;
 
-            Ok(Nelson {
+            Ok(Selma {
                 missing,
                 bouncing,
                 sticking,
             })
         } else {
-            Err(format!("failed to find Nelson"))
+            Err(format!("failed to find Selma"))
         }
     }
 
@@ -336,9 +336,9 @@ impl<R: Read + Send + 'static, W: Write + Send + 'static> Daemon for DaemonServe
                             }
                         }
                     }
-                    // System76 launch-nelson
+                    // System76 launch-selma
                     (0x3384, 0x0002, 0) => {
-                        if self.nelson.borrow().is_some() {
+                        if self.selma.borrow().is_some() {
                             continue;
                         }
 
@@ -346,23 +346,21 @@ impl<R: Read + Send + 'static, W: Write + Send + 'static> Daemon for DaemonServe
                             Ok(device) => match AccessHid::new(device, 10, 1000) {
                                 Ok(access) => match unsafe { Ec::new(access) } {
                                     Ok(ec) => {
-                                        info!("Adding Nelson at {:?}", info.path());
-                                        *self.nelson.borrow_mut() = Some(ec);
+                                        info!("Adding Selma at {:?}", info.path());
+                                        *self.selma.borrow_mut() = Some(ec);
                                     }
                                     Err(err) => error!(
-                                        "Failed to probe Nelson at {:?}: {:?}",
+                                        "Failed to probe Selma at {:?}: {:?}",
                                         info.path(),
                                         err
                                     ),
                                 },
-                                Err(err) => error!(
-                                    "Failed to access Nelson at {:?}: {:?}",
-                                    info.path(),
-                                    err
-                                ),
+                                Err(err) => {
+                                    error!("Failed to access Selma at {:?}: {:?}", info.path(), err)
+                                }
                             },
                             Err(err) => {
-                                error!("Failed to open Nelson at {:?}: {:?}", info.path(), err)
+                                error!("Failed to open Selma at {:?}: {:?}", info.path(), err)
                             }
                         }
                     }

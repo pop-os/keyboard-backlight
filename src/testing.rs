@@ -1,5 +1,5 @@
 use crate::fl;
-use backend::{Board, DerefCell, NelsonKind, Rgb};
+use backend::{Board, DerefCell, Rgb, SelmaKind};
 use cascade::cascade;
 use futures::{
     future::{abortable, AbortHandle},
@@ -175,7 +175,7 @@ impl ObjectImpl for TestingInner {
 
         obj.add(&cascade! {
             gtk::Box::new(gtk::Orientation::Vertical, 12);
-            ..add(&gtk::Label::new(Some("Nelson Test 1")));
+            ..add(&gtk::Label::new(Some("Selma Test 1")));
             ..add(&cascade! {
                 gtk::ListBox::new();
                 ..set_valign(gtk::Align::Start);
@@ -204,7 +204,7 @@ impl ObjectImpl for TestingInner {
 
         obj.add(&cascade! {
             gtk::Box::new(gtk::Orientation::Vertical, 12);
-            ..add(&gtk::Label::new(Some("Nelson Test 2")));
+            ..add(&gtk::Label::new(Some("Selma Test 2")));
             ..add(&cascade! {
                 gtk::ListBox::new();
                 ..set_valign(gtk::Align::Start);
@@ -231,7 +231,7 @@ impl ObjectImpl for TestingInner {
 
         obj.add(&cascade! {
             gtk::Box::new(gtk::Orientation::Vertical, 12);
-            ..add(&gtk::Label::new(Some("Nelson Test 3")));
+            ..add(&gtk::Label::new(Some("Selma Test 3")));
             ..add(&cascade! {
                 gtk::ListBox::new();
                 ..set_valign(gtk::Align::Start);
@@ -400,7 +400,7 @@ impl Testing {
         }
     }
 
-    async fn nelson(&self, test_index: usize, nelson_kind: NelsonKind) {
+    async fn selma(&self, test_index: usize, selma_kind: SelmaKind) {
         let testing = self.inner();
 
         info!("Disabling test buttons");
@@ -422,7 +422,7 @@ impl Testing {
 
         #[allow(unused_braces)]
         let (future, handle) = abortable(
-            clone!(@strong self as self_ => async move { self_.nelson_tests(test_index, nelson_kind).await }),
+            clone!(@strong self as self_ => async move { self_.selma_tests(test_index, selma_kind).await }),
         );
 
         let mut handles = testing.test_abort_handles.borrow_mut();
@@ -443,7 +443,7 @@ impl Testing {
         self.test_buttons_sensitive(test_index, true);
     }
 
-    async fn nelson_tests(&self, test_index: usize, nelson_kind: NelsonKind) {
+    async fn selma_tests(&self, test_index: usize, selma_kind: SelmaKind) {
         let testing = self.inner();
 
         let test_label = &testing.test_labels[test_index];
@@ -453,7 +453,7 @@ impl Testing {
             info!("{}", message);
             test_label.set_text(&message);
 
-            let nelson = match testing.board.nelson(nelson_kind).await {
+            let selma = match testing.board.selma(selma_kind).await {
                 Ok(ok) => ok,
                 Err(err) => {
                     let message = format!("Test {} failed to run: {}", test_run, err);
@@ -463,19 +463,19 @@ impl Testing {
                 }
             };
 
-            for row in 0..nelson.max_rows() {
-                for col in 0..nelson.max_cols() {
-                    let r = if nelson.missing.get(row, col).unwrap_or(false) {
+            for row in 0..selma.max_rows() {
+                for col in 0..selma.max_cols() {
+                    let r = if selma.missing.get(row, col).unwrap_or(false) {
                         255
                     } else {
                         0
                     };
-                    let g = if nelson.sticking.get(row, col).unwrap_or(false) {
+                    let g = if selma.sticking.get(row, col).unwrap_or(false) {
                         255
                     } else {
                         0
                     };
-                    let b = if nelson.bouncing.get(row, col).unwrap_or(false) {
+                    let b = if selma.bouncing.get(row, col).unwrap_or(false) {
                         255
                     } else {
                         0
@@ -494,7 +494,7 @@ impl Testing {
 
             self.notify("colors");
 
-            if nelson.success() {
+            if selma.success() {
                 let message = format!("Test {} successful", test_run);
                 info!("{}", message);
                 test_label.set_text(&message);
@@ -512,7 +512,7 @@ impl Testing {
             self.inner().start_buttons[i].connect_clicked(
                 clone!(@strong self as self_ => move |_| {
                     glib::MainContext::default().spawn_local(clone!(@strong self_ => async move {
-                        self_.nelson(i, NelsonKind::Normal).await
+                        self_.selma(i, SelmaKind::Normal).await
                     }));
                 }),
             );

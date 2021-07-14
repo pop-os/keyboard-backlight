@@ -9,8 +9,8 @@ use std::{cell::Cell, collections::HashMap, sync::Arc};
 
 use crate::daemon::ThreadClient;
 use crate::{
-    Benchmark, BoardId, Daemon, DerefCell, Key, KeyMap, KeyMapLayer, Layer, Layout, Matrix, Nelson,
-    NelsonKind,
+    Benchmark, BoardId, Daemon, DerefCell, Key, KeyMap, KeyMapLayer, Layer, Layout, Matrix, Selma,
+    SelmaKind,
 };
 
 #[derive(Default)]
@@ -208,8 +208,8 @@ impl Board {
         self.thread_client().benchmark(self.board()).await
     }
 
-    pub async fn nelson(&self, kind: NelsonKind) -> Result<Nelson, String> {
-        self.thread_client().nelson(self.board(), kind).await
+    pub async fn selma(&self, kind: SelmaKind) -> Result<Selma, String> {
+        self.thread_client().selma(self.board(), kind).await
     }
 
     pub async fn led_save(&self) -> Result<(), String> {

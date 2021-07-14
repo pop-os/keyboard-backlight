@@ -77,7 +77,8 @@ stack-testing = Testing
 
 test-check-pins = Check pins (missing)
 test-check-key = Check key (sticking)
-test-number-of-runs = Number of runs
-test-replace-switch = Replace switch
+test-replace-switch = Replace switch (bouncing)
+test-start = Start
+test-stop = Stop
 
 untitled-layout = Untitled Layout

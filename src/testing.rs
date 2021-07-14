@@ -1,6 +1,8 @@
 use crate::fl;
 use backend::{Board, DerefCell, NelsonKind, Rgb};
 use cascade::cascade;
+use futures::future::{abortable, AbortHandle};
+use glib::clone;
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
 use once_cell::sync::OnceCell;
@@ -52,14 +54,10 @@ pub struct TestingInner {
     reset_button: DerefCell<gtk::Button>,
     bench_button: DerefCell<gtk::ToggleButton>,
     bench_labels: DerefCell<HashMap<&'static str, gtk::Label>>,
-    test_button_1: DerefCell<gtk::Button>,
-    test_label_1: DerefCell<gtk::Label>,
-    num_runs_spin_2: DerefCell<gtk::SpinButton>,
-    test_button_2: DerefCell<gtk::Button>,
-    test_label_2: DerefCell<gtk::Label>,
-    num_runs_spin_3: DerefCell<gtk::SpinButton>,
-    test_button_3: DerefCell<gtk::Button>,
-    test_label_3: DerefCell<gtk::Label>,
+    start_buttons: DerefCell<[gtk::Button; 3]>,
+    stop_buttons: DerefCell<[gtk::Button; 3]>,
+    test_labels: DerefCell<[gtk::Label; 3]>,
+    test_abort_handles: RefCell<[Option<AbortHandle>; 3]>,
     colors: RefCell<TestingColors>,
 }
 
@@ -155,106 +153,109 @@ impl ObjectImpl for TestingInner {
             self.bench_labels.set(bench_labels);
         }
 
-        {
-            let test_button = gtk::Button::with_label("Test");
-            let test_label = gtk::Label::new(None);
+        let start_buttons = [
+            gtk::Button::with_label(&fl!("test-start")),
+            gtk::Button::with_label(&fl!("test-start")),
+            gtk::Button::with_label(&fl!("test-start")),
+        ];
+        let stop_buttons = [
+            gtk::Button::with_label(&fl!("test-stop")),
+            gtk::Button::with_label(&fl!("test-stop")),
+            gtk::Button::with_label(&fl!("test-stop")),
+        ];
+        let test_labels = [
+            gtk::Label::new(None),
+            gtk::Label::new(None),
+            gtk::Label::new(None),
+        ];
 
-            obj.add(&cascade! {
-                gtk::Box::new(gtk::Orientation::Vertical, 12);
-                ..add(&gtk::Label::new(Some("Nelson Test 1")));
-                ..add(&cascade! {
-                    gtk::ListBox::new();
-                    ..set_valign(gtk::Align::Start);
-                    ..get_style_context().add_class("frame");
-                    ..add(&row(&test_button));
-                    ..add(&row(&test_label));
-                    ..add(&label_row("Check pins (missing)", &color_box(1., 0., 0.)));
-                    ..add(&label_row("Check key (sticking)", &color_box(0., 1., 0.)));
-                    ..set_header_func(Some(Box::new(|row, before| {
-                        if before.is_none() {
-                            row.set_header::<gtk::Widget>(None)
-                        } else if row.get_header().is_none() {
-                            row.set_header(Some(&cascade! {
-                                gtk::Separator::new(gtk::Orientation::Horizontal);
-                                ..show();
-                            }));
-                        }
-                    })));
-                });
+        obj.add(&cascade! {
+            gtk::Box::new(gtk::Orientation::Vertical, 12);
+            ..add(&gtk::Label::new(Some("Nelson Test 1")));
+            ..add(&cascade! {
+                gtk::ListBox::new();
+                ..set_valign(gtk::Align::Start);
+                ..get_style_context().add_class("frame");
+                ..add(&row(&cascade! {
+                    gtk::Box::new(gtk::Orientation::Horizontal, 8);
+                    ..set_halign(gtk::Align::Center);
+                    ..add(&start_buttons[0]);
+                    ..add(&stop_buttons[0]);
+                }));
+                ..add(&row(&test_labels[0]));
+                ..add(&label_row(&fl!("test-check-pins"), &color_box(1., 0., 0.)));
+                ..add(&label_row(&fl!("test-check-key"), &color_box(0., 1., 0.)));
+                ..set_header_func(Some(Box::new(|row, before| {
+                    if before.is_none() {
+                        row.set_header::<gtk::Widget>(None)
+                    } else if row.get_header().is_none() {
+                        row.set_header(Some(&cascade! {
+                            gtk::Separator::new(gtk::Orientation::Horizontal);
+                            ..show();
+                        }));
+                    }
+                })));
             });
+        });
 
-            self.test_button_1.set(test_button);
-            self.test_label_1.set(test_label);
-        }
-
-        {
-            let num_runs_spin = gtk::SpinButton::with_range(1.0, 1000.0, 1.0);
-            let test_button = gtk::Button::with_label("Test");
-            let test_label = gtk::Label::new(None);
-
-            obj.add(&cascade! {
-                gtk::Box::new(gtk::Orientation::Vertical, 12);
-                ..add(&gtk::Label::new(Some("Nelson Test 2")));
-                ..add(&cascade! {
-                    gtk::ListBox::new();
-                    ..set_valign(gtk::Align::Start);
-                    ..get_style_context().add_class("frame");
-                    ..add(&label_row("Number of runs", &num_runs_spin));
-                    ..add(&row(&test_button));
-                    ..add(&row(&test_label));
-                    ..add(&label_row("Replace switch (bouncing)", &color_box(0., 0., 1.)));
-                    ..set_header_func(Some(Box::new(|row, before| {
-                        if before.is_none() {
-                            row.set_header::<gtk::Widget>(None)
-                        } else if row.get_header().is_none() {
-                            row.set_header(Some(&cascade! {
-                                gtk::Separator::new(gtk::Orientation::Horizontal);
-                                ..show();
-                            }));
-                        }
-                    })));
-                });
+        obj.add(&cascade! {
+            gtk::Box::new(gtk::Orientation::Vertical, 12);
+            ..add(&gtk::Label::new(Some("Nelson Test 2")));
+            ..add(&cascade! {
+                gtk::ListBox::new();
+                ..set_valign(gtk::Align::Start);
+                ..get_style_context().add_class("frame");
+                ..add(&row(&cascade! {
+                    gtk::Box::new(gtk::Orientation::Horizontal, 8);
+                    ..add(&start_buttons[1]);
+                    ..add(&stop_buttons[1]);
+                }));
+                ..add(&row(&test_labels[1]));
+                ..add(&label_row(&fl!("test-replace-switch"), &color_box(0., 0., 1.)));
+                ..set_header_func(Some(Box::new(|row, before| {
+                    if before.is_none() {
+                        row.set_header::<gtk::Widget>(None)
+                    } else if row.get_header().is_none() {
+                        row.set_header(Some(&cascade! {
+                            gtk::Separator::new(gtk::Orientation::Horizontal);
+                            ..show();
+                        }));
+                    }
+                })));
             });
+        });
 
-            self.num_runs_spin_2.set(num_runs_spin);
-            self.test_button_2.set(test_button);
-            self.test_label_2.set(test_label);
-        }
-
-        {
-            let num_runs_spin = gtk::SpinButton::with_range(1.0, 1000.0, 1.0);
-            let test_button = gtk::Button::with_label(&fl!("button-test"));
-            let test_label = gtk::Label::new(None);
-
-            obj.add(&cascade! {
-                gtk::Box::new(gtk::Orientation::Vertical, 12);
-                ..add(&gtk::Label::new(Some("Nelson Test 3")));
-                ..add(&cascade! {
-                    gtk::ListBox::new();
-                    ..set_valign(gtk::Align::Start);
-                    ..get_style_context().add_class("frame");
-                    ..add(&label_row(&fl!("test-number-of-runs"), &num_runs_spin));
-                    ..add(&row(&test_button));
-                    ..add(&row(&test_label));
-                    ..add(&label_row(&fl!("test-check-pins"), &color_box(1., 0., 0.)));
-                    ..add(&label_row(&fl!("test-check-key"), &color_box(0., 1., 0.)));
-                    ..set_header_func(Some(Box::new(|row, before| {
-                        if before.is_none() {
-                            row.set_header::<gtk::Widget>(None)
-                        } else if row.get_header().is_none() {
-                            row.set_header(Some(&cascade! {
-                                gtk::Separator::new(gtk::Orientation::Horizontal);
-                                ..show();
-                            }));
-                        }
-                    })));
-                });
+        obj.add(&cascade! {
+            gtk::Box::new(gtk::Orientation::Vertical, 12);
+            ..add(&gtk::Label::new(Some("Nelson Test 3")));
+            ..add(&cascade! {
+                gtk::ListBox::new();
+                ..set_valign(gtk::Align::Start);
+                ..get_style_context().add_class("frame");
+                ..add(&row(&cascade! {
+                    gtk::Box::new(gtk::Orientation::Horizontal, 8);
+                    ..add(&start_buttons[2]);
+                    ..add(&stop_buttons[2]);
+                }));
+                ..add(&row(&test_labels[2]));
+                ..add(&label_row(&fl!("test-check-pins"), &color_box(1., 0., 0.)));
+                ..add(&label_row(&fl!("test-check-key"), &color_box(0., 1., 0.)));
+                ..set_header_func(Some(Box::new(|row, before| {
+                    if before.is_none() {
+                        row.set_header::<gtk::Widget>(None)
+                    } else if row.get_header().is_none() {
+                        row.set_header(Some(&cascade! {
+                            gtk::Separator::new(gtk::Orientation::Horizontal);
+                            ..show();
+                        }));
+                    }
+                })));
             });
+        });
 
-            self.num_runs_spin_3.set(num_runs_spin);
-            self.test_button_3.set(test_button);
-            self.test_label_3.set(test_label);
-        }
+        self.start_buttons.set(start_buttons);
+        self.stop_buttons.set(stop_buttons);
+        self.test_labels.set(test_labels);
 
         cascade! {
             obj;
@@ -387,137 +388,142 @@ impl Testing {
         });
     }
 
-    fn test_buttons_sensitive(&self, sensitive: bool) {
-        self.inner().test_button_1.set_sensitive(sensitive);
-        self.inner().test_button_2.set_sensitive(sensitive);
-        self.inner().test_button_3.set_sensitive(sensitive);
+    fn test_buttons_sensitive(&self, test_index: usize, sensitive: bool) {
+        for i in 0..3 {
+            self.inner().start_buttons[i].set_sensitive(sensitive);
+            self.inner().stop_buttons[i].set_sensitive(i == test_index && !sensitive);
+        }
     }
 
-    fn nelson(&self, test_runs: i32, test_index: i32, nelson_kind: NelsonKind) {
+    async fn nelson(&self, test_index: usize, nelson_kind: NelsonKind) {
+        let testing = self.inner();
+
         info!("Disabling test buttons");
-        self.test_buttons_sensitive(false);
+        self.test_buttons_sensitive(test_index, false);
 
-        let obj_nelson = self.clone();
-        glib::MainContext::default().spawn_local(async move {
-            let testing = obj_nelson.inner();
-
-            let test_label = match test_index {
-                1 => &testing.test_label_1,
-                2 => &testing.test_label_2,
-                3 => &testing.test_label_3,
-                _ => panic!("unknown test index {}", test_index),
-            };
-
-            info!("Save and clear keymap");
-            let keymap = testing.board.export_keymap();
-            {
-                let mut empty = keymap.clone();
-                for (_name, codes) in empty.map.iter_mut() {
-                    for code in codes.iter_mut() {
-                        *code = "NONE".to_string();
-                    }
-                }
-                if let Err(err) = import_keymap_hack(&testing.board, &empty).await {
-                    error!("Failed to clear keymap: {}", err);
+        info!("Save and clear keymap");
+        let keymap = testing.board.export_keymap();
+        {
+            let mut empty = keymap.clone();
+            for (_name, codes) in empty.map.iter_mut() {
+                for code in codes.iter_mut() {
+                    *code = "NONE".to_string();
                 }
             }
+            if let Err(err) = import_keymap_hack(&testing.board, &empty).await {
+                error!("Failed to clear keymap: {}", err);
+            }
+        }
 
-            for test_run in 1..=test_runs {
-                let message = format!("Test {}/{} running", test_run, test_runs);
-                info!("{}", message);
-                test_label.set_text(&message);
+        #[allow(unused_braces)]
+        let (future, handle) = abortable(
+            clone!(@strong self as self_ => async move { self_.nelson_tests(test_index, nelson_kind).await }),
+        );
 
-                let nelson = match testing.board.nelson(nelson_kind).await {
-                    Ok(ok) => ok,
-                    Err(err) => {
-                        let message =
-                            format!("Test {}/{} failed to run: {}", test_run, test_runs, err);
-                        error!("{}", message);
-                        test_label.set_text(&message);
-                        break;
-                    }
-                };
+        let mut handles = testing.test_abort_handles.borrow_mut();
+        if let Some(prev_handle) = &handles[test_index] {
+            prev_handle.abort();
+        }
+        handles[test_index] = Some(handle);
+        drop(handles);
 
-                for row in 0..nelson.max_rows() {
-                    for col in 0..nelson.max_cols() {
-                        let r = if nelson.missing.get(row, col).unwrap_or(false) {
-                            255
-                        } else {
-                            0
-                        };
-                        let g = if nelson.sticking.get(row, col).unwrap_or(false) {
-                            255
-                        } else {
-                            0
-                        };
-                        let b = if nelson.bouncing.get(row, col).unwrap_or(false) {
-                            255
-                        } else {
-                            0
-                        };
-                        if r != 0 || g != 0 || b != 0 {
-                            testing
-                                .colors
-                                .borrow_mut()
-                                .0
-                                .insert((row, col), Rgb::new(r, g, b));
-                        } else {
-                            testing.colors.borrow_mut().0.remove(&(row, col));
-                        }
-                    }
-                }
+        let _ = future.await;
 
-                obj_nelson.notify("colors");
+        info!("Restore keymap");
+        if let Err(err) = import_keymap_hack(&testing.board, &keymap).await {
+            error!("Failed to restore keymap: {}", err);
+        }
 
-                if nelson.success() {
-                    let message = format!("Test {}/{} successful", test_run, test_runs);
-                    info!("{}", message);
-                    test_label.set_text(&message);
-                } else {
-                    let message = format!("Test {}/{} failed", test_run, test_runs);
+        info!("Enabling test buttons");
+        self.test_buttons_sensitive(test_index, true);
+    }
+
+    async fn nelson_tests(&self, test_index: usize, nelson_kind: NelsonKind) {
+        let testing = self.inner();
+
+        let test_label = &testing.test_labels[test_index];
+
+        for test_run in 1i32.. {
+            let message = format!("Test {} running", test_run);
+            info!("{}", message);
+            test_label.set_text(&message);
+
+            let nelson = match testing.board.nelson(nelson_kind).await {
+                Ok(ok) => ok,
+                Err(err) => {
+                    let message = format!("Test {} failed to run: {}", test_run, err);
                     error!("{}", message);
                     test_label.set_text(&message);
                     break;
                 }
+            };
+
+            for row in 0..nelson.max_rows() {
+                for col in 0..nelson.max_cols() {
+                    let r = if nelson.missing.get(row, col).unwrap_or(false) {
+                        255
+                    } else {
+                        0
+                    };
+                    let g = if nelson.sticking.get(row, col).unwrap_or(false) {
+                        255
+                    } else {
+                        0
+                    };
+                    let b = if nelson.bouncing.get(row, col).unwrap_or(false) {
+                        255
+                    } else {
+                        0
+                    };
+                    if r != 0 || g != 0 || b != 0 {
+                        testing
+                            .colors
+                            .borrow_mut()
+                            .0
+                            .insert((row, col), Rgb::new(r, g, b));
+                    } else {
+                        testing.colors.borrow_mut().0.remove(&(row, col));
+                    }
+                }
             }
 
-            info!("Restore keymap");
-            if let Err(err) = import_keymap_hack(&testing.board, &keymap).await {
-                error!("Failed to restore keymap: {}", err);
+            self.notify("colors");
+
+            if nelson.success() {
+                let message = format!("Test {} successful", test_run);
+                info!("{}", message);
+                test_label.set_text(&message);
+            } else {
+                let message = format!("Test {} failed", test_run);
+                error!("{}", message);
+                test_label.set_text(&message);
+                break;
             }
-
-            info!("Enabling test buttons");
-            obj_nelson.test_buttons_sensitive(true);
-        });
+        }
     }
 
-    fn connect_test_button_1(&self) {
-        let obj_btn = self.clone();
-        self.inner().test_button_1.connect_clicked(move |_| {
-            obj_btn.nelson(1, 1, NelsonKind::Normal);
-        });
-    }
-
-    fn connect_test_button_2(&self) {
-        let obj_btn = self.clone();
-        self.inner().test_button_2.connect_clicked(move |_| {
-            obj_btn.nelson(
-                obj_btn.inner().num_runs_spin_2.get_value_as_int(),
-                2,
-                NelsonKind::Bouncing,
+    fn connect_start_buttons(&self) {
+        for i in 0..3 {
+            self.inner().start_buttons[i].connect_clicked(
+                clone!(@strong self as self_ => move |_| {
+                    glib::MainContext::default().spawn_local(clone!(@strong self_ => async move {
+                        self_.nelson(i, NelsonKind::Normal).await
+                    }));
+                }),
             );
-        });
+        }
     }
 
-    fn connect_test_button_3(&self) {
-        let obj_btn = self.clone();
-        self.inner().test_button_3.connect_clicked(move |_| {
-            obj_btn.nelson(
-                obj_btn.inner().num_runs_spin_3.get_value_as_int(),
-                3,
-                NelsonKind::Normal,
+    fn connect_stop_buttons(&self) {
+        for i in 0..3 {
+            self.inner().stop_buttons[i].connect_clicked(
+                clone!(@strong self as self_ => move |_| {
+                    if let Some(handle) = self_.inner().test_abort_handles.borrow_mut()[i].take() {
+                        handle.abort();
+                    }
+                }),
             );
-        });
+        }
     }
 
     fn connect_reset_button(&self) {
@@ -532,9 +538,8 @@ impl Testing {
         let obj: Self = glib::Object::new(&[]).unwrap();
         obj.inner().board.set(board);
         obj.connect_bench_button();
-        obj.connect_test_button_1();
-        obj.connect_test_button_2();
-        obj.connect_test_button_3();
+        obj.connect_start_buttons();
+        obj.connect_stop_buttons();
         obj.connect_reset_button();
         obj.update_benchmarks();
         obj

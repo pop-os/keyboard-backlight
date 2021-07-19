@@ -32,6 +32,9 @@ pub static SCANCODE_LABELS: Lazy<HashMap<String, String>> = Lazy::new(|| {
 pub struct PickerInner {
     group_box: DerefCell<PickerGroupBox>,
     keyboard: RefCell<Option<Keyboard>>,
+    mod_tap_box: DerefCell<gtk::Box>,
+    mod_tap_check: DerefCell<gtk::CheckButton>,
+    mod_tap_mods: DerefCell<gtk::ComboBoxText>,
 }
 
 #[glib::object_subclass]
@@ -52,13 +55,49 @@ impl ObjectImpl for PickerInner {
             }));
         };
 
+        // TODO: set initial values, bind change
+
+        let mod_tap_check = cascade! {
+            gtk::CheckButton::with_label("Mod-Tap");
+            ..connect_toggled(clone!(@weak picker => move |_| {
+                picker.mod_tap_updated();
+            }));
+        };
+
+        let mod_tap_mods = cascade! {
+            gtk::ComboBoxText::new();
+            ..append(Some("LCTL"), "Left Ctrl");
+            ..append(Some("LSFT"), "Left Shift");
+            ..append(Some("LALT"), "Left Alt");
+            ..append(Some("LGUI"), "Left Super");
+            ..append(Some("RCTL"), "Right Ctrl");
+            ..append(Some("RSFT"), "Right Shift");
+            ..append(Some("RALT"), "Right Alt");
+            ..append(Some("RGUI"), "Right Super");
+            ..connect_property_active_id_notify(clone!(@weak picker => move |_| {
+                picker.mod_tap_updated();
+            }));
+        };
+
+        let mod_tap_box = cascade! {
+            gtk::Box::new(gtk::Orientation::Horizontal, 8);
+            ..add(&mod_tap_check);
+            ..add(&mod_tap_mods);
+        };
+
         cascade! {
             picker;
+            ..set_spacing(18);
+            ..set_orientation(gtk::Orientation::Vertical);
             ..add(&group_box);
+            ..add(&mod_tap_box);
             ..show_all();
         };
 
         self.group_box.set(group_box);
+        self.mod_tap_box.set(mod_tap_box);
+        self.mod_tap_check.set(mod_tap_check);
+        self.mod_tap_mods.set(mod_tap_mods);
     }
 }
 
@@ -96,6 +135,7 @@ impl Picker {
     }
 
     pub(crate) fn set_selected(&self, scancode_names: Vec<String>) {
+        // TODO selected needs to support mod tap
         self.inner().group_box.set_selected(scancode_names);
     }
 
@@ -119,6 +159,29 @@ impl Picker {
             }
             glib::MainContext::default().spawn_local(async { futures.collect::<()>().await });
         }
+    }
+
+    fn mod_tap_updated(&self) {
+        fn mt(mod_: u16, kc: u16) -> u16 {
+            0x6000 | ((mod_ & 0x1f) << 8) | (kc & 0xff)
+        }
+
+        //MT(mod, kc) (QK_MOD_TAP | (((mod)&0x1F) << 8) | ((kc)&0xFF))
+        let active = self.inner().mod_tap_check.get_active();
+        let kc: u16 = match self.inner().mod_tap_mods.get_active_id().as_deref() {
+            Some("LCTL") => 0x01,
+            Some("LSFT") => 0x02,
+            Some("LALT") => 0x04,
+            Some("LGUI") => 0x08,
+            Some("RCTL") => 0x11,
+            Some("RSFT") => 0x12,
+            Some("RALT") => 0x14,
+            Some("RGUI") => 0x18,
+            Some(_) => unreachable!(),
+            None => {
+                return;
+            }
+        };
     }
 }
 
